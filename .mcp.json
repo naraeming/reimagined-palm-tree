@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "slack-lists": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\Admin\\Documents\\reimagined-palm-tree\\tools\\slack-lists-mcp\\src\\index.js"
+      ]
+    }
+  }
+}

@@ -1,6 +1,10 @@
 import { Client } from '@notionhq/client';
+import { NotionUtils } from '../notion-utils.js';
 
 const NOTION_API_VERSION = '2025-09-03';
+
+// 성과·유저분석 데이터베이스 ID (상위 데이터베이스)
+const PERFORMANCE_PARENT_DB_ID = '39f292345a5281f4bfdfea7ad739976b';
 
 export class PerformanceExtractor {
   constructor(token) {
@@ -8,16 +12,45 @@ export class PerformanceExtractor {
       auth: token,
       notionVersion: NOTION_API_VERSION,
     });
+    this.utils = new NotionUtils(token);
+    this.dbMap = {}; // 데이터베이스 ID 캐시
+  }
+
+  /**
+   * 성과·유저분석 페이지의 하위 데이터베이스들을 동적으로 탐색하여 캐시
+   */
+  async discoverDatabases() {
+    if (Object.keys(this.dbMap).length > 0) {
+      return; // 이미 탐색됨
+    }
+
+    try {
+      console.log('🔍 성과·유저분석 하위 데이터베이스 탐색 중...');
+      const childDbs = await this.utils.findChildDatabases(PERFORMANCE_PARENT_DB_ID);
+
+      for (const db of childDbs) {
+        // 제목으로 데이터베이스 분류
+        if (db.title.includes('월간') || db.title.includes('리포트')) {
+          this.dbMap.reports = db.id;
+          console.log(`  ✅ 리포트 DB: ${db.id}`);
+        }
+      }
+
+      // 데이터베이스를 찾지 못한 경우 로깅
+      if (!this.dbMap.reports) {
+        console.warn('⚠️ 리포트 DB를 찾지 못했습니다.');
+      }
+    } catch (error) {
+      console.error('데이터베이스 탐색 실패:', error.message);
+    }
   }
 
   async extractMonthlyReports() {
     try {
-      const results = await this.client.databases.query({
-        database_id: 'ef623abec9474f20ac29e9a4bf0d2b25',
-        page_size: 100,
-      });
+      const dbId = this.dbMap.reports || '39f292345a5281f4bfdfea7ad739976b';
+      const results = await this.utils.queryDatabase(dbId);
 
-      return results.results.map((page) => ({
+      return results.map((page) => ({
         id: page.id,
         reportName: page.properties.리포트?.title?.[0]?.plain_text || 'Unknown',
         period: page.properties['date:기준월:start']?.date || '',
@@ -42,6 +75,9 @@ export class PerformanceExtractor {
   }
 
   async extractAll() {
+    // 먼저 하위 데이터베이스들을 탐색
+    await this.discoverDatabases();
+
     const reports = await this.extractMonthlyReports();
 
     // 월간/분기 분리

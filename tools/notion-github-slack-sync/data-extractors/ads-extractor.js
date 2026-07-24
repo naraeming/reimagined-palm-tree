@@ -1,6 +1,10 @@
 import { Client } from '@notionhq/client';
+import { NotionUtils } from '../notion-utils.js';
 
 const NOTION_API_VERSION = '2025-09-03';
+
+// 광고 운영관리 데이터베이스 ID (상위 데이터베이스)
+const ADS_PARENT_DB_ID = '383292345a5281c5b79ac787ad0690c3';
 
 export class AdsExtractor {
   constructor(token) {
@@ -8,19 +12,57 @@ export class AdsExtractor {
       auth: token,
       notionVersion: NOTION_API_VERSION,
     });
+    this.utils = new NotionUtils(token);
+    this.dbMap = {}; // 데이터베이스 ID 캐시
+  }
+
+  /**
+   * 광고 운영관리 페이지의 하위 데이터베이스들을 동적으로 탐색하여 캐시
+   */
+  async discoverDatabases() {
+    if (Object.keys(this.dbMap).length > 0) {
+      return; // 이미 탐색됨
+    }
+
+    try {
+      console.log('🔍 광고 운영관리 하위 데이터베이스 탐색 중...');
+      const childDbs = await this.utils.findChildDatabases(ADS_PARENT_DB_ID);
+
+      for (const db of childDbs) {
+        // 제목으로 데이터베이스 분류
+        if (db.title.includes('캠페인')) {
+          this.dbMap.campaigns = db.id;
+          console.log(`  ✅ 캠페인 DB: ${db.id}`);
+        } else if (db.title.includes('소재')) {
+          this.dbMap.materials = db.id;
+          console.log(`  ✅ 소재 DB: ${db.id}`);
+        } else if (db.title.includes('오디언스')) {
+          this.dbMap.audiences = db.id;
+          console.log(`  ✅ 오디언스 DB: ${db.id}`);
+        }
+      }
+
+      // 데이터베이스를 찾지 못한 경우 로깅
+      if (!this.dbMap.campaigns) {
+        console.warn('⚠️ 캠페인 DB를 찾지 못했습니다.');
+      }
+      if (!this.dbMap.materials) {
+        console.warn('⚠️ 소재 DB를 찾지 못했습니다.');
+      }
+      if (!this.dbMap.audiences) {
+        console.warn('⚠️ 오디언스 DB를 찾지 못했습니다.');
+      }
+    } catch (error) {
+      console.error('데이터베이스 탐색 실패:', error.message);
+    }
   }
 
   async extractCampaigns() {
-    const dataSourceUrl = 'collection://b62221dc-8406-4227-a80c-01b054045826';
-    const campaignsQuery = `SELECT * FROM "${dataSourceUrl}" ORDER BY date:최근 캠페인 변경일:start DESC`;
-
     try {
-      const results = await this.client.databases.query({
-        database_id: 'b62221dc-8406-4227-a80c-01b054045826',
-        page_size: 100,
-      });
+      const dbId = this.dbMap.campaigns || '383292345a5281c5b79ac787ad0690c3';
+      const results = await this.utils.queryDatabase(dbId);
 
-      return results.results.map((page) => ({
+      return results.map((page) => ({
         id: page.id,
         name: page.properties.캠페인명?.title?.[0]?.plain_text || 'Unknown',
         platform: page.properties.플랫폼?.select?.name || '',
@@ -43,12 +85,10 @@ export class AdsExtractor {
 
   async extractMaterials() {
     try {
-      const results = await this.client.databases.query({
-        database_id: '837ccd1b8e994f3ba89f4df28bcdeb75',
-        page_size: 100,
-      });
+      const dbId = this.dbMap.materials || 'fallback-materials-db-id';
+      const results = await this.utils.queryDatabase(dbId);
 
-      return results.results.map((page) => ({
+      return results.map((page) => ({
         id: page.id,
         name: page.properties['사용 기록']?.rich_text?.[0]?.plain_text || 'Unknown',
         campaign: page.properties.캠페인?.relation?.[0]?.id || '',
@@ -66,12 +106,10 @@ export class AdsExtractor {
 
   async extractAudiences() {
     try {
-      const results = await this.client.databases.query({
-        database_id: 'a9c6d76dca10416e94dcb6dc3c06b04d',
-        page_size: 100,
-      });
+      const dbId = this.dbMap.audiences || 'fallback-audiences-db-id';
+      const results = await this.utils.queryDatabase(dbId);
 
-      return results.results.map((page) => ({
+      return results.map((page) => ({
         id: page.id,
         name: page.properties.Title?.title?.[0]?.plain_text || 'Unknown',
         definition: page.properties.정의?.rich_text?.[0]?.plain_text || '',
@@ -84,6 +122,9 @@ export class AdsExtractor {
   }
 
   async extractAll() {
+    // 먼저 하위 데이터베이스들을 탐색
+    await this.discoverDatabases();
+
     const [campaigns, materials, audiences] = await Promise.all([
       this.extractCampaigns(),
       this.extractMaterials(),

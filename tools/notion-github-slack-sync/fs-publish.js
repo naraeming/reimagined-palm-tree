@@ -110,6 +110,79 @@ export class FileSystemPublisher {
     return summary;
   }
 
+  /**
+   * 전체 트리를 재귀적으로 마크다운 파일로 작성 (diff 없이)
+   * @param {Object} tree - Notion 트리 구조
+   * @returns {Promise<Object>} 작성 요약
+   */
+  async publishTree(tree) {
+    const summary = {
+      filesWritten: 0,
+      filesDeleted: 0,
+      errors: [],
+    };
+
+    if (!tree) {
+      return summary;
+    }
+
+    // Initialize mirror directory
+    await this.ensureDir(this.mirrorDir);
+
+    // 재귀적으로 트리 작성
+    const writeTreeNode = async (node, parentPath = '') => {
+      if (!node) return;
+
+      try {
+        const nodePath = node.path || `${parentPath}/${node.slug || 'node'}`;
+
+        if (node.type === 'page') {
+          // 페이지 저장
+          if (node.hasChildren) {
+            // 자식이 있으면 _index.md로 저장
+            await this.writeFile(`${nodePath}/_index.md`, node.markdown || '');
+          } else {
+            // 자식이 없으면 .md로 저장
+            await this.writeFile(`${nodePath}.md`, node.markdown || '');
+          }
+          summary.filesWritten++;
+
+          // 자식 노드들 처리
+          if (node.children && Array.isArray(node.children)) {
+            for (const child of node.children) {
+              await writeTreeNode(child, nodePath);
+            }
+          }
+        } else if (node.type === 'database') {
+          // 데이터베이스 테이블 저장
+          const tableMarkdown = this.generateDatabaseTable(node);
+          await this.writeFile(`${nodePath}/_index.md`, tableMarkdown);
+          summary.filesWritten++;
+
+          // 각 행 저장
+          if (node.children && Array.isArray(node.children)) {
+            for (const row of node.children) {
+              await writeTreeNode(row, `${nodePath}/rows`);
+            }
+          }
+        } else if (node.type === 'database-row') {
+          // 데이터베이스 행 저장
+          if (node.markdown && node.markdown.trim()) {
+            await this.writeFile(`${nodePath}.md`, node.markdown);
+            summary.filesWritten++;
+          }
+        }
+      } catch (error) {
+        summary.errors.push(`Failed to write ${node.title || node.id}: ${error.message}`);
+      }
+    };
+
+    // 트리 작성 시작
+    await writeTreeNode(tree);
+
+    return summary;
+  }
+
   findNodeById(tree, id) {
     if (tree.id === id) return tree;
     if (!tree.children) return null;

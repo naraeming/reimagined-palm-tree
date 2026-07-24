@@ -23,39 +23,60 @@ export class GitPublisher {
   }
 
   async checkAndCommit(summary) {
-    // Check if there are any changes
-    const status = this.exec('git status --porcelain notion-mirror/');
-
-    if (!status) {
+    if (this.dryRun) {
+      console.log('📝 [DRY-RUN] 변경사항이 있으면 커밋할 예정\n');
       return {
         changed: false,
-        reason: 'No changes detected',
-      };
-    }
-
-    if (this.dryRun) {
-      return {
-        changed: true,
         dryRun: true,
-        reason: 'Would commit (dry-run mode)',
-        changes: status,
+        reason: 'Dry-run mode enabled',
       };
     }
 
-    // Stage all changes in notion-mirror/
-    this.exec('git add -A notion-mirror/ _manifest.json', { stdio: 'inherit' });
+    // Stage all changes
+    try {
+      this.exec('git add -A');
+      console.log('📦 변경사항 스테이징 완료');
+    } catch (error) {
+      console.error('❌ 스테이징 실패:', error.message);
+      return {
+        changed: false,
+        error: error.message,
+      };
+    }
+
+    // Check if there are staged changes
+    const statusOutput = this.exec('git status --porcelain');
+
+    if (!statusOutput) {
+      console.log('ℹ️  변경사항 없음 - 커밋 스킵');
+      return {
+        changed: false,
+        reason: 'No changes to commit',
+      };
+    }
+
+    console.log('📋 스테이징된 변경사항:\n' + statusOutput);
 
     // Create commit message
-    const { added, updated, moved, deleted } = summary;
+    const { filesWritten = 0, filesDeleted = 0 } = summary;
     const parts = [];
-    if (added > 0) parts.push(`+${added} added`);
-    if (updated > 0) parts.push(`~${updated} updated`);
-    if (moved > 0) parts.push(`→${moved} moved`);
-    if (deleted > 0) parts.push(`-${deleted} deleted`);
+    if (filesWritten > 0) parts.push(`+${filesWritten} files`);
+    if (filesDeleted > 0) parts.push(`-${filesDeleted} files`);
 
-    const message = `chore: notion mirror sync — ${parts.join(', ')}`;
+    const message = parts.length > 0
+      ? `chore: notion mirror sync — ${parts.join(', ')}`
+      : 'chore: notion mirror sync';
 
-    this.exec(`git commit -m "${message}"`, { stdio: 'inherit' });
+    try {
+      this.exec(`git commit -m "${message.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
+      console.log(`✅ 커밋 완료: ${message}`);
+    } catch (error) {
+      console.error('❌ 커밋 실패:', error.message);
+      return {
+        changed: false,
+        error: error.message,
+      };
+    }
 
     // Get commit info
     const sha = this.exec('git rev-parse HEAD');
