@@ -1,0 +1,11 @@
+# Codex Pipeline - Local runs (not tracked in git)
+runs/
+*.live.log
+*.tmp
+
+# Sensitive data
+*secret*
+*token*
+*password*
+*.env.local
+.env.*.local
