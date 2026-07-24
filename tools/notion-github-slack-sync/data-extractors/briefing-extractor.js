@@ -1,5 +1,4 @@
 import { Client } from '@notionhq/client';
-import { NotionUtils } from '../notion-utils.js';
 
 const NOTION_API_VERSION = '2025-09-03';
 
@@ -12,34 +11,38 @@ export class BriefingExtractor {
       auth: token,
       notionVersion: NOTION_API_VERSION,
     });
-    this.utils = new NotionUtils(token);
   }
 
   async extractBriefings() {
     try {
-      const results = await this.utils.queryDatabase(BRIEFING_DB_ID);
+      console.log('  📊 브리핑 추출 중...');
+      const results = await this.client.databases.query({
+        database_id: BRIEFING_DB_ID,
+        sorts: [
+          {
+            property: 'date:기록일:start',
+            direction: 'descending',
+          },
+        ],
+        page_size: 100,
+      });
 
-      return results
-        .sort((a, b) => {
-          const dateA = a.properties['date:기록일:start']?.date || '1900-01-01';
-          const dateB = b.properties['date:기록일:start']?.date || '1900-01-01';
-          return dateB.localeCompare(dateA);
-        })
-        .map((page) => ({
-          id: page.id,
-          date: page.properties['date:기록일:start']?.date || '',
-          title: page.properties.Title?.title?.[0]?.plain_text || 'Unknown',
-          content: page.properties.내용?.rich_text?.[0]?.plain_text || '',
-          highlights: page.properties.주요포인트?.rich_text || [],
-          action: page.properties.액션아이템?.rich_text?.[0]?.plain_text || '',
-        }));
+      return results.results.map((page) => ({
+        id: page.id,
+        date: page.properties['date:기록일:start']?.date || '',
+        title: page.properties.Title?.title?.[0]?.plain_text || 'Unknown',
+        content: page.properties.내용?.rich_text?.[0]?.plain_text || '',
+        highlights: page.properties.주요포인트?.rich_text || [],
+        action: page.properties.액션아이템?.rich_text?.[0]?.plain_text || '',
+      }));
     } catch (error) {
-      console.error('Failed to extract briefings:', error.message);
+      console.error('  ❌ 브리핑 추출 실패:', error.message);
       return [];
     }
   }
 
   async extractLatest(count = 7) {
+    console.log('📌 DK 모닝 브리핑 데이터 추출...');
     const all = await this.extractBriefings();
     return {
       briefings: all.slice(0, count),
