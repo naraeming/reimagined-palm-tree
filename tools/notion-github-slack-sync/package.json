@@ -1,0 +1,18 @@
+{
+  "name": "notion-github-slack-sync",
+  "version": "1.0.0",
+  "description": "Daily sync: Notion → Markdown in GitHub → Slack notifications",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "sync.js",
+  "scripts": {
+    "sync": "node sync.js",
+    "sync:dry": "node sync.js --dry-run",
+    "check": "node --check config.js notion-export.js blocks-to-markdown.js manifest.js fs-publish.js git-publish.js slack-notify.js sync.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^3.1.2"
+  }
+}
