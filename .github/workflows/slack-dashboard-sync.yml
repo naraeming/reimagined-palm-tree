@@ -1,0 +1,51 @@
+name: Slack Dashboard Sync (Ads, Content, Performance, Briefing)
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slack-dashboard-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: tools/notion-github-slack-sync
+        run: npm ci
+
+      - name: Validate syntax
+        working-directory: tools/notion-github-slack-sync
+        run: npm run check
+
+      - name: Run enhanced sync (Ads + Content + Performance + Briefing)
+        working-directory: tools/notion-github-slack-sync
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+          VERBOSE: "1"
+        run: node sync-enhanced.js
+
+      - name: Check for errors
+        if: failure()
+        run: |
+          echo "Slack Dashboard Sync failed. Check logs above."
+          exit 1
