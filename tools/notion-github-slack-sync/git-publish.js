@@ -1,10 +1,27 @@
 import { execSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { resolve } from 'node:path';
 
 export class GitPublisher {
   constructor(repoRoot, dryRun = false) {
-    this.repoRoot = repoRoot;
+    // Convert to absolute path to ensure correct directory
+    this.repoRoot = resolve(repoRoot);
     this.dryRun = dryRun;
+
+    // Validate that this is a git repository
+    this.validateGitRepo();
+  }
+
+  validateGitRepo() {
+    try {
+      execSync('git rev-parse --git-dir', {
+        cwd: this.repoRoot,
+        stdio: 'pipe',
+        encoding: 'utf-8',
+      });
+    } catch (error) {
+      throw new Error(`Invalid git repository at ${this.repoRoot}: ${error.message}`);
+    }
   }
 
   exec(command, options = {}) {
@@ -18,7 +35,7 @@ export class GitPublisher {
     try {
       return execSync(command, opts).trim();
     } catch (error) {
-      throw new Error(`Git command failed: ${command}\n${error.stderr || error.message}`);
+      throw new Error(`Git command failed in ${this.repoRoot}: ${command}\n${error.stderr || error.message}`);
     }
   }
 
@@ -34,6 +51,7 @@ export class GitPublisher {
 
     // Stage all changes
     try {
+      console.log(`   Running: git add -A`);
       this.exec('git add -A');
       console.log('📦 변경사항 스테이징 완료');
     } catch (error) {
@@ -45,7 +63,16 @@ export class GitPublisher {
     }
 
     // Check if there are staged changes
-    const statusOutput = this.exec('git status --porcelain');
+    let statusOutput;
+    try {
+      statusOutput = this.exec('git status --porcelain');
+    } catch (error) {
+      console.error('❌ Git 상태 확인 실패:', error.message);
+      return {
+        changed: false,
+        error: error.message,
+      };
+    }
 
     if (!statusOutput) {
       console.log('ℹ️  변경사항 없음 - 커밋 스킵');
@@ -68,6 +95,7 @@ export class GitPublisher {
       : 'chore: notion mirror sync';
 
     try {
+      console.log(`   Running: git commit -m "${message}"`);
       this.exec(`git commit -m "${message.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
       console.log(`✅ 커밋 완료: ${message}`);
     } catch (error) {
@@ -79,7 +107,18 @@ export class GitPublisher {
     }
 
     // Get commit info
-    const sha = this.exec('git rev-parse HEAD');
+    let sha;
+    try {
+      sha = this.exec('git rev-parse HEAD');
+    } catch (error) {
+      console.error('❌ Commit SHA 조회 실패:', error.message);
+      return {
+        changed: true,
+        message,
+        error: `Failed to get commit SHA: ${error.message}`,
+      };
+    }
+
     const commitUrl = `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/commit/${sha}`;
 
     return {

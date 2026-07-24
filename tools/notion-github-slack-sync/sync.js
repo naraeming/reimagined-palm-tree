@@ -33,14 +33,24 @@ async function main() {
     console.log(`✅ Configuration loaded`);
     console.log(`   Notion Root Page ID: ${config.notionRootPageId}`);
     console.log(`   Slack Channel: ${config.slackChannelId}`);
+    console.log(`   Repo Root: ${config.repoRoot}`);
+    console.log(`   Mirror Dir: ${config.mirrorDir}`);
     console.log(`   Dry Run: ${config.dryRun}\n`);
 
     // Step 1: Export from Notion
     console.log('📡 Step 1: Exporting from Notion...');
+    console.log(`   Root Page ID: ${config.notionRootPageId}`);
     const exporter = new NotionExporter(config.notionToken);
-    const tree = await exporter.exportWorkspace(config.notionRootPageId);
+
+    let tree;
+    try {
+      tree = await exporter.exportWorkspace(config.notionRootPageId);
+    } catch (error) {
+      throw new Error(`Notion export failed: ${error.message}`);
+    }
+
     if (!tree) {
-      throw new Error('Failed to export Notion workspace');
+      throw new Error('Failed to export Notion workspace - tree is null');
     }
     console.log(`✅ Exported: ${tree.title}`);
     console.log(`   Found ${exporter.visited.size} pages/databases\n`);
@@ -81,19 +91,41 @@ async function main() {
 
     // Step 3: Publish to filesystem
     console.log('💾 Step 3: Publishing to filesystem...');
+    console.log(`   Target directory: ${config.mirrorDir}`);
     const fsPublisher = new FileSystemPublisher(config.mirrorDir);
-    const fsSummary = await fsPublisher.publish(tree, diff);
+    let fsSummary;
+    try {
+      fsSummary = await fsPublisher.publish(tree, diff);
+    } catch (error) {
+      throw new Error(`Filesystem publish failed: ${error.message}`);
+    }
     console.log(`✅ Files published:`);
     console.log(`   Written: ${fsSummary.filesWritten}, Deleted: ${fsSummary.filesDeleted}`);
     if (fsSummary.errors.length > 0) {
       console.warn(`   Errors: ${fsSummary.errors.join('; ')}`);
+      if (config.verbose) {
+        console.warn('   (Enable VERBOSE=1 to see full details)');
+      }
     }
     console.log();
 
     // Step 4: Commit to git
     console.log('🔗 Step 4: Committing to git...');
-    const gitPublisher = new GitPublisher(config.repoRoot, config.dryRun);
-    const commitResult = await gitPublisher.checkAndCommit(summary);
+    console.log(`   Repository: ${config.repoRoot}`);
+    let gitPublisher;
+    try {
+      gitPublisher = new GitPublisher(config.repoRoot, config.dryRun);
+    } catch (error) {
+      throw new Error(`Git repository invalid: ${error.message}`);
+    }
+
+    let commitResult;
+    try {
+      commitResult = await gitPublisher.checkAndCommit(summary);
+    } catch (error) {
+      throw new Error(`Git commit failed: ${error.message}`);
+    }
+
     if (commitResult.changed) {
       console.log(`✅ ${commitResult.message}`);
       if (commitResult.commitSha) {
@@ -102,6 +134,9 @@ async function main() {
       }
     } else {
       console.log(`ℹ️ ${commitResult.reason}`);
+      if (commitResult.error) {
+        console.warn(`   Error: ${commitResult.error}`);
+      }
     }
     console.log();
 

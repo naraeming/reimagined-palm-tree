@@ -134,6 +134,11 @@ export class FileSystemPublisher {
       if (!node) return;
 
       try {
+        // Validate node structure
+        if (!node.type) {
+          throw new Error(`Node missing type property: ${node.title || node.id}`);
+        }
+
         const nodePath = node.path || `${parentPath}/${node.slug || 'node'}`;
 
         if (node.type === 'page') {
@@ -171,6 +176,8 @@ export class FileSystemPublisher {
             await this.writeFile(`${nodePath}.md`, node.markdown);
             summary.filesWritten++;
           }
+        } else {
+          throw new Error(`Unknown node type: ${node.type}`);
         }
       } catch (error) {
         summary.errors.push(`Failed to write ${node.title || node.id}: ${error.message}`);

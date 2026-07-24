@@ -1,7 +1,10 @@
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Calculate repo root: go up from tools/notion-github-slack-sync to repo root
+const calculatedRepoRoot = resolve(dirname(dirname(dirname(__dirname))));
 
 export const config = {
   // API credentials from environment
@@ -14,10 +17,10 @@ export const config = {
   // Set via env variable or default placeholder
   notionRootPageId: process.env.NOTION_ROOT_PAGE_ID || 'f13e1e9f7b55478fb85d04d38e293de7',
 
-  // File paths
-  repoRoot: process.env.REPO_ROOT || dirname(dirname(dirname(__dirname))),
-  mirrorDir: join(dirname(dirname(dirname(__dirname))), 'notion-mirror'),
-  manifestPath: join(dirname(dirname(dirname(__dirname))), 'notion-mirror', '_manifest.json'),
+  // File paths (always absolute)
+  repoRoot: process.env.REPO_ROOT || calculatedRepoRoot,
+  mirrorDir: join(calculatedRepoRoot, 'notion-mirror'),
+  manifestPath: join(calculatedRepoRoot, 'notion-mirror', '_manifest.json'),
 
   // Slack configuration
   slack: {

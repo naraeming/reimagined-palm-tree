@@ -62,10 +62,28 @@ export class NotionExporter {
     return blockListToMarkdown(blocks, getChildren);
   }
 
+  validateId(id) {
+    // Notion IDs should be 32 hex characters or UUID format
+    if (!id || typeof id !== 'string') {
+      throw new Error(`Invalid ID type: ${typeof id}`);
+    }
+    // Remove hyphens for comparison
+    const cleanId = id.replace(/-/g, '');
+    if (!/^[a-f0-9]{32}$/i.test(cleanId)) {
+      console.warn(`⚠️ Unusual ID format: ${id} (cleaned: ${cleanId})`);
+    }
+  }
+
   async fetchPage(pageId) {
     try {
+      this.validateId(pageId);
       return await this.client.pages.retrieve({ page_id: pageId });
     } catch (error) {
+      // Check if error is about ID being a database
+      if (error.message && error.message.includes('is a database')) {
+        console.warn(`⚠️ ID ${pageId} is a database, not a page. Skipping.`);
+        return null;
+      }
       console.warn(`Failed to fetch page ${pageId}: ${error.message}`);
       return null;
     }
@@ -73,6 +91,7 @@ export class NotionExporter {
 
   async fetchDatabase(databaseId) {
     try {
+      this.validateId(databaseId);
       return await this.client.databases.retrieve({ database_id: databaseId });
     } catch (error) {
       console.warn(`Failed to fetch database ${databaseId}: ${error.message}`);
@@ -85,6 +104,7 @@ export class NotionExporter {
     let cursor;
 
     try {
+      this.validateId(databaseId);
       while (true) {
         const response = await this.client.databases.query({
           database_id: databaseId,
@@ -97,7 +117,13 @@ export class NotionExporter {
         cursor = response.next_cursor;
       }
     } catch (error) {
-      console.warn(`Failed to query database ${databaseId}: ${error.message}`);
+      if (error.message && error.message.includes('Invalid request URL')) {
+        console.error(`❌ Invalid Notion API request for database ${databaseId}:`);
+        console.error(`   Error: ${error.message}`);
+        console.error(`   This might be due to an invalid ID format or database structure`);
+      } else {
+        console.warn(`Failed to query database ${databaseId}: ${error.message}`);
+      }
     }
 
     return rows;
