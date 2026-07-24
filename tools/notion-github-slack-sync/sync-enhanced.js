@@ -27,7 +27,8 @@ async function main() {
 
     console.log(`✅ 광고: ${adsData.campaigns.length}개 캠페인, ${adsData.materials.length}개 소재`);
     console.log(`✅ 콘텐츠: ${contentData.calendar.length}개 포스트, ${contentData.topics.length}개 주제`);
-    console.log(`✅ 성과: ${performanceData.monthly.length}개월 리포트`);
+    const monthlyReports = performanceData.all?.filter((r) => r.type === '월간') || [];
+    console.log(`✅ 성과: ${monthlyReports.length}개월 리포트`);
     console.log(`✅ 브리핑: ${briefingData.briefings.length}개 항목\n`);
 
     // Canvas 생성

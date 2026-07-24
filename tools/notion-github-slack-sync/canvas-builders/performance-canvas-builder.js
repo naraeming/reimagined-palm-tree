@@ -1,6 +1,10 @@
 export class PerformanceCanvasBuilder {
   build(performanceData) {
-    const { monthly, quarterly, latest } = performanceData;
+    // all 배열로부터 월간/분기 필터링
+    const all = performanceData.all || [];
+    const monthly = all.filter((r) => r.type === '월간');
+    const quarterly = all.filter((r) => r.type === '분기');
+    const latest = performanceData.latest || monthly[0] || null;
 
     let md = `# 📊 성과·유저 분석\n\n`;
     md += `_마지막 업데이트: ${new Date().toISOString().split('T')[0]}_\n\n`;

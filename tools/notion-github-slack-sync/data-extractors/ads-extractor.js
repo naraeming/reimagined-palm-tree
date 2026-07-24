@@ -18,12 +18,6 @@ export class AdsExtractor {
       console.log('  📊 캠페인 추출 중...');
       const results = await this.client.databases.query({
         database_id: ADS_DB_ID,
-        filter: {
-          property: '상태',
-          select: {
-            equals: '진행중',
-          },
-        },
         sorts: [
           {
             property: 'date:시작일:start',
@@ -59,12 +53,6 @@ export class AdsExtractor {
       console.log('  📊 소재 추출 중...');
       const results = await this.client.databases.query({
         database_id: ADS_DB_ID,
-        filter: {
-          property: '사용 상태',
-          select: {
-            equals: '사용중',
-          },
-        },
         sorts: [
           {
             property: 'date:사용 시작일:start',
