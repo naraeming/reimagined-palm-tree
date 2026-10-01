@@ -13,3 +13,7 @@ npm-debug.log*
 dist/
 build/
 .cache/
+
+# Local app-account analysis results (never publish in this repository).
+/outputs/private-app-user-trends/
+/outputs/app-user-trends-20261001/
