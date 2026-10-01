@@ -229,6 +229,10 @@ def verify_trends(sources, report_dir):
                 if daily:expected=(count/days)/(orders(month=prior)/calendar.monthrange(*map(int,prior.split('-')))[1])-1
                 close(sh.cell(row,c).value,expected)
         assert sh.cell(row,13).value==('교체 예정' if m in pending else '제공본')
+    total_row=len(months)+6
+    close(values['월별추이'].cell(total_row,2).value,orders())
+    close(values['월별추이'].cell(total_row,7).value,orders(status_group='cancelled')/orders())
+    close(values['월별추이'].cell(total_row,9).value,orders()/sum(calendar.monthrange(*map(int,m.split('-')))[1] for m in months))
     for block in layout['matrix']:
         sh=values['분류별추이']
         for row,group in enumerate(d[block['table']],block['start']):

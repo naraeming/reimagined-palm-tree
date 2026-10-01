@@ -139,22 +139,34 @@ async function buildTrendReport(data,folder){
   const pending=new Set(data.scope.replacement_pending_months||[]);
   const col=i=>{let out='';for(i++;i;i=Math.floor((i-1)/26))out=String.fromCharCode(65+(i-1)%26)+out;return out;};
   const quote=v=>'"'+String(v).replaceAll('"','""')+'"';
-  const rc=c=>`'집계자료'!$${c}$6:$${c}$${lastRaw}`;
-  const sum=(measure,conds)=>`SUMIFS(${rc(measure)},${conds.map(([c,v])=>rc(c)+','+v).join(',')})`;
+  const monthRanges=new Map();
+  data.rows.forEach((r,i)=>{if(!monthRanges.has(r.month))monthRanges.set(r.month,{start:i+6,end:i+6,count:0});const span=monthRanges.get(r.month);span.end=i+6;span.count++;});
+  for(const span of monthRanges.values())if(span.end-span.start+1!==span.count)throw new Error('Source rows must be contiguous by month');
+  const rc=(c,month)=>{const span=monthRanges.get(month);return `'집계자료'!$${c}$${span.start}:$${c}$${span.end}`;};
+  const sum=(measure,conds,month)=>`SUMIFS(${rc(measure,month)},${conds.map(([c,v])=>rc(c,month)+','+v).join(',')})`;
   const cell=(sh,at,value)=>{sh.getRange(at).values=[[value]];};
-  const form=(sh,at,value)=>{sh.getRange(at).formulas=[['='+value]];};
+  const formulaQueue=new Map();
+  const form=(sh,at,value)=>{if(!formulaQueue.has(sh))formulaQueue.set(sh,[]);formulaQueue.get(sh).push([at,'='+value]);};
+  function flushFormulas(){
+    for(const [sh,cells] of formulaQueue){
+      const rows=new Map();
+      for(const [at,value] of cells){const [,letters,row]=at.match(/^([A-Z]+)(\d+)$/);let index=0;for(const letter of letters)index=index*26+letter.charCodeAt(0)-64;if(!rows.has(row))rows.set(row,[]);rows.get(row).push({index:index-1,value});}
+      for(const [row,items] of rows){items.sort((a,b)=>a.index-b.index);let start=0;while(start<items.length){let end=start+1;while(end<items.length&&items[end].index===items[end-1].index+1)end++;sh.getRange(`${col(items[start].index)}${row}:${col(items[end-1].index)}${row}`).formulas=[items.slice(start,end).map(x=>x.value)];start=end;}}
+    }
+  }
   const fmt=(sh,range,f='#,##0')=>{sh.getRange(range).setNumberFormat(f);sh.getRange(range).format.horizontalAlignment='right';};
   const init=(sh,range,title)=>{sh.showGridLines=false;sh.getRange(range).format={font:{name:face,size:10,color:'#263442'},columnWidth:17,rowHeight:24,verticalAlignment:'center'};cell(sh,'A2',title);sh.getRange('A2').format.font={name:face,size:16,bold:true,color:ink};};
   const note=(sh,at,value)=>{cell(sh,at,value);sh.getRange(at).format.font={name:face,size:10,color:'#536272'};};
   const head=(sh,row,labels)=>{const range=sh.getRange(`A${row}:${col(labels.length-1)}${row}`);range.values=[labels];range.format={font:{name:face,size:10,bold:true,color:'#FFFFFF'},fill:ink,rowHeight:38,wrapText:true,verticalAlignment:'center',horizontalAlignment:'center'};};
   init(raw,`A1:O${lastRaw}`,'월별 입력 집계 자료');
-  note(raw,'A3','확인된 머리글만 제외. 도시 항목이 없는 원본은 별도 표시. 우측 출처 파일과 원본 행으로 대조 가능합니다.');
+  note(raw,'A3','확인된 머리글만 제외. 우측 출처 파일·원본 행으로 대조 가능합니다. 자료 갱신·행 재정렬은 원본 파일에서 보고서를 다시 생성하세요.');
   head(raw,5,['주문월','통화','국가','도시','업종','주문언어','상태 코드','상태 해석','상태 분류','상품금액','최종금액','주문수','원본 행']);
   cell(raw,'O5','출처 파일');
   raw.getRange(`A6:M${lastRaw}`).values=data.rows.map(r=>[r.month,r.currency,r.country,r.city,r.industry,r.language,r.status==='blank'?'공란':r.status,r.status_label,r.status_group,Number(r.product_amount),Number(r.final_amount),r.orders,r.source_row]);
   raw.getRange(`O6:O${lastRaw}`).values=data.rows.map(r=>[r.source_file]);
   raw.getRange(`D1:D${lastRaw}`).format.columnWidth=24;raw.getRange(`H1:K${lastRaw}`).format.columnWidth=25;
   fmt(raw,`J6:K${lastRaw}`,'#,##0.000');fmt(raw,`L6:M${lastRaw}`);raw.freezePanes.freezeRows(5);
+  console.log('Trend report: source rows populated');
 
   const monthly=tabs['월별추이'],endMonth=months.length+5;
   init(monthly,`A1:M${endMonth+25}`,`${months[0]} ~ ${months.at(-1)} 주문 추이`);monthly.tabColor=ink;
@@ -166,7 +178,7 @@ async function buildTrendReport(data,folder){
     cell(monthly,`A${row}`,m);cell(monthly,`H${row}`,new Date(Date.UTC(year,month,0)).getUTCDate());
     cell(monthly,`M${row}`,pending.has(m)?'교체 예정':'제공본');
     const cond=[['A',`A${row}`]];
-    ['all','completed','cancelled','known_other','unknown'].forEach((status,j)=>form(monthly,`${col(j+1)}${row}`,sum('L',status==='all'?cond:[...cond,['I',quote(status)]])));
+    ['all','completed','cancelled','known_other','unknown'].forEach((status,j)=>form(monthly,`${col(j+1)}${row}`,sum('L',status==='all'?cond:[...cond,['I',quote(status)]],m)));
     form(monthly,`G${row}`,`IF(B${row}=0,"n.a.",D${row}/B${row})`);form(monthly,`I${row}`,`B${row}/H${row}`);
     for(const [target,base,key] of [['J','B',prev],['K','I',prev],['L','B',py]]){
       const prior=months.indexOf(key)+6;
@@ -174,11 +186,19 @@ async function buildTrendReport(data,folder){
     }
   }
   fmt(monthly,`B6:F${endMonth}`);fmt(monthly,`G6:G${endMonth}`,'0.00%');fmt(monthly,`H6:H${endMonth}`);fmt(monthly,`I6:I${endMonth}`,'#,##0.0');fmt(monthly,`J6:L${endMonth}`,'0.00%');
+  const totalRow=endMonth+1;cell(monthly,`A${totalRow}`,'기간 합계');
+  for(const c of ['B','C','D','E','F','H'])form(monthly,`${c}${totalRow}`,`SUM(${c}6:${c}${endMonth})`);
+  form(monthly,`G${totalRow}`,`D${totalRow}/B${totalRow}`);form(monthly,`I${totalRow}`,`B${totalRow}/H${totalRow}`);
+  for(const c of ['J','K','L'])cell(monthly,`${c}${totalRow}`,'n.a.');cell(monthly,`M${totalRow}`,pending.size?'교체 예정 포함':'제공본 합계');
+  fmt(monthly,`B${totalRow}:F${totalRow}`);fmt(monthly,`G${totalRow}`,'0.00%');fmt(monthly,`H${totalRow}`);fmt(monthly,`I${totalRow}`,'#,##0.0');
+  fmt(monthly,`J${totalRow}:L${totalRow}`,'0.00%');monthly.getRange(`M6:M${totalRow}`).format.horizontalAlignment='center';
+  monthly.getRange(`A${totalRow}:M${totalRow}`).format.font={name:face,size:10,bold:true,color:ink};
   const chartTop=endMonth+3;
   const chart=monthly.charts.add('line',monthly.getRange(`A5:B${endMonth}`));chart.title='월별 전체 주문수';chart.titleTextStyle.typeface=face;chart.titleTextStyle.fontSize=13;chart.hasLegend=false;chart.setPosition(`A${chartTop}`,`H${chartTop+13}`);chart.xAxis={axisType:'textAxis',textStyle:{typeface:face,fontSize:10}};chart.yAxis={numberFormatCode:'#,##0',numberFormatSourceLinked:false,textStyle:{typeface:face,fontSize:10}};
   note(monthly,`A${chartTop+15}`,'직전 월·전년 동월이 없거나 교체 예정이면 증감률은 n.a.입니다. 일평균 = 주문수 / 월 일수. 연간 성장률은 자료 확보 후 계산합니다.');
   note(monthly,`A${chartTop+16}`,`도시 포함 월: ${data.scope.city_months.join(', ')}. 도시가 없는 월은 도시별 0건으로 취급하지 않습니다.`);
   note(monthly,`A${chartTop+17}`,data.totals.unknown_status_orders?'정의가 확인되지 않은 주문상태는 별도 집계하며 배달완료 금액에 포함하지 않습니다.':'모든 상태 코드를 확인된 정의로 분류했습니다.');
+  console.log('Trend report: monthly layout ready');
 
   const dims=tabs['분류별추이'],lastMatrix=col(months.length+2);init(dims,`A1:${lastMatrix}${data.countries.length+data.languages.length+data.industries.length+18}`,'국가·주문언어·업종별 주문 추이');
   note(dims,'A3',pending.size?'교체 예정 월은 기존 제공본 기준 참고값입니다. 전체 상태의 주문수이며 언어별 사용자 수·국적을 뜻하지 않습니다.':'전체 상태의 주문수 기준. 언어는 주문언어이며 사용자 수·국적과 다릅니다. 마지막 열은 최근 월의 주문 비중입니다.');
@@ -187,7 +207,7 @@ async function buildTrendReport(data,folder){
     head(dims,top,[label,...months,'기간 합계','최근 월 비중']);
     for(let i=0;i<data[table].length;i++){
       const r=top+i+1;cell(dims,`A${r}`,data[table][i][key]);
-      for(let j=0;j<months.length;j++)form(dims,`${col(j+1)}${r}`,sum('L',[[rawColumn,`$A${r}`],['A',`${col(j+1)}$${top}`]]));
+      for(let j=0;j<months.length;j++)form(dims,`${col(j+1)}${r}`,sum('L',[[rawColumn,`$A${r}`],['A',`${col(j+1)}$${top}`]],months[j]));
       form(dims,`${col(months.length+1)}${r}`,`SUM(B${r}:${col(months.length)}${r})`);
       form(dims,`${lastMatrix}${r}`,`${col(months.length)}${r}/'월별추이'!B${endMonth}`);
     }
@@ -200,7 +220,7 @@ async function buildTrendReport(data,folder){
   head(city,5,['국가','도시',...months,'도시 제공월 합계']);
   for(let i=0;i<cityKeys.length;i++){
     const row=i+6,r=cityKeys[i];city.getRange(`A${row}:B${row}`).values=[[r.country,r.city]];
-    for(let j=0;j<months.length;j++)form(city,`${col(j+2)}${row}`,data.scope.city_months.includes(months[j])?sum('L',[['C',`$A${row}`],['D',`$B${row}`],['A',`${col(j+2)}$5`]]):'"n.a."');
+    for(let j=0;j<months.length;j++)form(city,`${col(j+2)}${row}`,data.scope.city_months.includes(months[j])?sum('L',[['C',`$A${row}`],['D',`$B${row}`],['A',`${col(j+2)}$5`]],months[j]):'"n.a."');
     form(city,`${cityLast}${row}`,`SUM(C${row}:${col(months.length+1)}${row})`);
   }
   fmt(city,`C6:${cityLast}${cityKeys.length+5}`);city.freezePanes.freezeRows(5);
@@ -208,20 +228,22 @@ async function buildTrendReport(data,folder){
   const amounts=tabs['통화별추이'],currencyRows=[...data.monthly_currency].sort((a,b)=>a.currency.localeCompare(b.currency)||a.month.localeCompare(b.month));
   init(amounts,`A1:I${currencyRows.length+6}`,'통화별 배달완료 주문금액 추이');amounts.getRange(`D1:E${currencyRows.length+6}`).format.columnWidth=27;amounts.getRange(`F1:F${currencyRows.length+6}`).format.columnWidth=23;
   note(amounts,'A3','배달완료 주문만 포함. 통화 간 합산 금지. 최종금액은 배달비·할인 포함이며 회사 매출·이익·정산액을 뜻하지 않습니다.');
-  note(amounts,'A4','금액 전월 대비는 같은 통화의 직전 월과 비교합니다. 교체 예정 월이 포함된 증감률은 보류하며 해당 월 금액은 기존 제공본 참고값입니다.');
+  note(amounts,'A4',pending.size?'금액 전월 대비는 같은 통화의 직전 월과 비교합니다. 교체 예정 월이 포함된 증감률은 보류하며 해당 월 금액은 기존 제공본 참고값입니다.':'금액 전월 대비는 같은 통화의 직전 월과 비교합니다. 추출 조건·전체성 확인 전 제공 파일 기준 잠정 증감률입니다.');
   head(amounts,5,['주문월','통화','완료 주문수','완료 상품금액','완료 최종금액','주문당 최종금액','최종금액 전월 대비','객단가 전월 대비','전체 주문수']);
   for(let i=0;i<currencyRows.length;i++){
     const row=i+6,r=currencyRows[i],conds=[['A',`A${row}`],['B',`B${row}`],['I','"completed"']];amounts.getRange(`A${row}:B${row}`).values=[[r.month,r.currency]];
-    for(const [target,measure] of [['C','L'],['D','J'],['E','K']])form(amounts,`${target}${row}`,sum(measure,conds));
+    for(const [target,measure] of [['C','L'],['D','J'],['E','K']])form(amounts,`${target}${row}`,sum(measure,conds,r.month));
     form(amounts,`F${row}`,data.scope.amounts_are_sums_confirmed?`IF(C${row}=0,"n.a.",E${row}/C${row})`:'"합계 기준 확인 전"');
     const [y,m]=r.month.split('-').map(Number),prev=m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,'0')}`;
     const pi=currencyRows.findIndex(x=>x.currency===r.currency&&x.month===prev),pr=pi+6;
     const ready=pi>=0&&!pending.has(r.month)&&!pending.has(prev);
     form(amounts,`G${row}`,ready?`IF(E${pr}=0,"n.a.",E${row}/E${pr}-1)`:'"n.a."');
     form(amounts,`H${row}`,ready&&data.scope.amounts_are_sums_confirmed?`IF(OR(C${pr}=0,C${row}=0,F${pr}=0),"n.a.",F${row}/F${pr}-1)`:'"n.a."');
-    form(amounts,`I${row}`,sum('L',conds.slice(0,2)));
+    form(amounts,`I${row}`,sum('L',conds.slice(0,2),r.month));
   }
   fmt(amounts,`C6:C${currencyRows.length+5}`);fmt(amounts,`D6:F${currencyRows.length+5}`,'#,##0.00');fmt(amounts,`G6:H${currencyRows.length+5}`,'0.00%');fmt(amounts,`I6:I${currencyRows.length+5}`);amounts.freezePanes.freezeRows(5);
+  console.log('Trend report: applying grouped formulas');
+  flushFormulas();
 
   const before=raw.getRange('L6').values[0][0],firstMonth=data.rows[0].month,mr=months.indexOf(firstMonth)+6;
   raw.getRange('L6').values=[[before+1]];
@@ -229,6 +251,7 @@ async function buildTrendReport(data,folder){
   raw.getRange('L6').values=[[before]];book.recalculate();
   for(let i=0;i<months.length;i++)if(monthly.getRange(`B${i+6}`).values[0][0]!==data.monthly[i].orders)throw new Error('Monthly total mismatch');
   const errors=await book.inspect({kind:'match',searchTerm:'#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A|#NUM!|#NULL!|#SPILL!|#CALC!',options:{useRegex:true,maxResults:20},summary:'Order trend formula errors'});
+  console.log('Trend report: calculations checked; rendering previews');
   await fs.writeFile(path.join(folder,'order-formula-check.json'),errors.ndjson);
   const ranges={'월별추이':`A1:M${chartTop+18}`,'분류별추이':`A1:${lastMatrix}${top-2}`,'도시추이':`A1:${cityLast}15`,'통화별추이':'A1:I18','집계자료':'A1:O12'};
   for(const [sheetName,range] of Object.entries(ranges)){const blob=await book.render({sheetName,range,scale:1,format:'png'});await fs.writeFile(path.join(folder,`preview-${sheetName}.png`),new Uint8Array(await blob.arrayBuffer()));}
