@@ -25,6 +25,8 @@ python -X utf8 tools/app-user-trends/analyze.py --input '<원본 폴더>' --outp
 
 전체 월별 자료임이 확인된 경우에만 `--completeness-confirmed`를 사용합니다. 모든 월의 건수가 같은 경우 내보내기 제한 가능성을 먼저 확인해야 합니다. 빈칸이 0건이라는 사실을 확인한 경우에만 `--blank-counts-are-zero`를 사용합니다.
 
+관리 화면 등에서 월별 조회 건수를 확인했다면 로컬 CSV(`month,total_accounts,approximate,source`)를 `--reference-counts '<파일>'`로 전달할 수 있습니다. 근삿값은 `approximate=true`로 표시합니다. 조회 건수와 파일 계정 수가 다르면 전체성 확인 옵션이 있어도 성장률을 계산하지 않습니다. 월별 총건수만 확보하면 전체 가입 증가율을 계산할 수 있지만 국가·언어별 증가율에는 해당 분류의 전체 건수가 별도로 필요합니다.
+
 성장률은 다음 기준을 따릅니다.
 
 - 전월 대비: 해당 월 계정 수 / 직전 월 계정 수 − 1.

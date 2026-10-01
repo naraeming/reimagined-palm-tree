@@ -7,7 +7,9 @@ if (!input || !output) throw new Error('Usage: node build-report.mjs analysis.js
 const d = JSON.parse(await fs.readFile(input,'utf8'));
 const reportName=`회원분석_${d.scope.first_month.replace('-','')}-${d.scope.last_month.replace('-','')}_제공분검증.xlsx`;
 const sameCount = d.monthly.every(m=>m.accounts===d.monthly[0].accounts);
-const scopeWarning=d.scope.growth_available?'전체성 확인 후 비교 가능한 성장률을 계산했습니다.':sameCount?`매월 ${d.monthly[0].accounts}계정으로 동일해 전체 규모·성장률 계산을 보류했습니다.`:'파일 전체성 확인 전까지 전체 규모·성장률 계산을 보류했습니다.';
+const mismatch=(d.count_checks??[]).find(c=>c.counts_differ);
+const completenessText=mismatch?`${mismatch.month} 조회 ${mismatch.reported_total_is_approximate?'약 ':''}${mismatch.reported_total_accounts.toLocaleString('en-US')}개 / 파일 ${mismatch.observed_accounts.toLocaleString('en-US')}개 (약 ${(mismatch.observed_fraction*100).toFixed(2)}%)`:null;
+const scopeWarning=mismatch?`${completenessText}. 전체 자료가 아니므로 성장률 계산을 보류했습니다.`:d.scope.growth_available?'전체성 확인 후 비교 가능한 성장률을 계산했습니다.':sameCount?`매월 ${d.monthly[0].accounts}계정으로 동일해 전체 규모·성장률 계산을 보류했습니다.`:'파일 전체성 확인 전까지 전체 규모·성장률 계산을 보류했습니다.';
 await fs.mkdir(output,{recursive:true});
 const wb=Workbook.create();
 const names=['요약','월별집계','언어별','지역별','국가언어','방법과확인사항'];
@@ -85,7 +87,7 @@ const method=[
  ['계정 단위','숫자 회원 ID로 구분. 동일인이 여러 계정을 만들 수 있음','실제 사람 수 추정 불가'],
  ['가입월','파일명 YYMM. 월초 00:00~월말 23:59 등록 기준','관리 화면 필터의 시간대 확인'],
  ['중복 처리','동일 숫자 ID 및 모든 필드가 같은 행만 1개로 집계','서로 다른 ID를 동일인으로 합치지 않음'],
- ['파일 전체성',d.scope.completeness_confirmed?'월 전체 자료로 확인됨':sameCount?`모든 파일이 고유 ID ${d.monthly[0].accounts}개. 전체성 미확인`:'월 전체 자료인지 미확인','건수 제한·현재 페이지만 다운로드 여부 확인'],
+ ['파일 전체성',completenessText??(d.scope.completeness_confirmed?'월 전체 자료로 확인됨':sameCount?`모든 파일이 고유 ID ${d.monthly[0].accounts}개. 전체성 미확인`:'월 전체 자료인지 미확인'),mismatch?'사용자가 전달한 조회 건수 기준. 전체 내보내기 필요':'건수 제한·현재 페이지만 다운로드 여부 확인'],
  ['성장률',d.scope.growth_available?'비교 가능 기간만 산출':'전월·전년 동월·연간 성장률 계산 보류','완전한 월별 계정 수 확보 필요'],
  ['연간 비교','연간 전체와 일부 월의 합계를 직접 비교하지 않음','전체성 확인 후 전년 동일 기간 비교'],
  ['현재 앱 언어','추출 당시 값. 최초에는 기기 언어, 이후 변경 가능','과거 당시 언어 추이 복원 불가'],
@@ -124,7 +126,7 @@ const limitations=[
  '현재 설정 언어로 과거 가입월을 분류했습니다. 당시 언어 변화는 알 수 없습니다.',
  '기록 국가·도시는 국적이나 실제 배달 지역과 다를 수 있습니다.',
  '누적 주문 수는 월별 주문량이나 같은 관찰 기간의 전환·유지율이 아닙니다.',
- '다음 단계: 월 전체 내보내기 확인, 빈칸 의미 확인, 이전 가입월·주문·AppsFlyer 추가.',
+ mismatch?'다음 단계: 월 전체 계정 추출 또는 월별 총건수·국가·언어별 집계 확보.':'다음 단계: 월 전체 내보내기 확인, 빈칸 의미 확인, 이전 가입월·주문·AppsFlyer 추가.',
 ];
 for(let i=0;i<limitations.length;i++)note(sum,`A${33+i}`,limitations[i]);
 

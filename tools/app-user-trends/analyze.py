@@ -63,7 +63,7 @@ def csv_out(path, rows):
         writer.writerows(rows)
 
 
-def analyze(input_dir, output_dir, start=None, end=None, completeness_confirmed=False, blanks_are_zero=False):
+def analyze(input_dir, output_dir, start=None, end=None, completeness_confirmed=False, blanks_are_zero=False, reference_counts=None):
     files = []
     for path in input_dir.glob("*.xlsx"):
         if not re.fullmatch(r"\d{4}", path.stem):
@@ -179,8 +179,27 @@ def analyze(input_dir, output_dir, start=None, end=None, completeness_confirmed=
         expected.append(current.strftime("%Y-%m"))
         current = dt.date(current.year + (current.month == 12), current.month % 12 + 1, 1)
     missing_months = sorted(set(expected) - coverage)
-    growth_ready = completeness_confirmed and not missing_months
     lookup = {m["month"]: m["accounts"] for m in monthly}
+    count_checks = []
+    if reference_counts:
+        with reference_counts.open(encoding='utf-8-sig',newline='') as handle:
+            for ref in csv.DictReader(handle):
+                if ref['month'] not in lookup:
+                    continue
+                expected_count = int(ref['total_accounts'])
+                if expected_count <= 0:
+                    raise ValueError('Reference account total must be positive')
+                observed_count = lookup[ref['month']]
+                approximate = ref.get('approximate','false').lower() == 'true'
+                mismatch = observed_count != expected_count
+                count_checks.append({'month':ref['month'],'reported_total_accounts':expected_count,
+                                     'reported_total_is_approximate':approximate,'observed_accounts':observed_count,
+                                     'observed_fraction':observed_count/expected_count,'counts_differ':mismatch,
+                                     'source':ref.get('source','')})
+                if mismatch:
+                    qualifier='약 ' if approximate else ''
+                    issues.append(f"{ref['month']} 조회 건수 {qualifier}{expected_count:,}개와 파일 {observed_count:,}개가 다릅니다. 비율은 제공분 포함률이며 통계적 표본 추출률이 아닙니다.")
+    growth_ready = completeness_confirmed and not missing_months and not any(c['counts_differ'] for c in count_checks)
     for i, m in enumerate(monthly):
         year, mon = map(int, m["month"].split("-"))
         prev = f"{year - (mon == 1):04}-{12 if mon == 1 else mon-1:02}"
@@ -219,7 +238,7 @@ def analyze(input_dir, output_dir, start=None, end=None, completeness_confirmed=
                       "duplicate_rows_removed":sum(m['duplicate_rows_removed'] for m in monthly),
                       "cross_month_duplicate_accounts":0,
                       **{k:sum(m[k] for m in monthly) for k in monthly[0] if k.endswith('_accounts') or k=='recorded_cumulative_orders'}},
-            "issues":issues,"monthly":monthly,"annual":annual,"matched_periods":matched_periods,"languages":totals(language,['language']),
+            "issues":issues,"count_checks":count_checks,"monthly":monthly,"annual":annual,"matched_periods":matched_periods,"languages":totals(language,['language']),
             "countries":totals(country,['country']),"cities":totals(city,['country','city']),
             "country_language":totals(country_language,['country','language']),"levels":totals(level,['level']),
             "monthly_language":[{"month":m,"language":l,"accounts":n,"within_month_share":n/lookup[m]} for (m,l),n in sorted(monthly_language.items())],
@@ -230,7 +249,7 @@ def analyze(input_dir, output_dir, start=None, end=None, completeness_confirmed=
     assert result['totals']['raw_rows']-result['totals']['duplicate_rows_removed']==total
     output_dir.mkdir(parents=True,exist_ok=True)
     (output_dir/'analysis.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
-    for name in ['monthly','annual','matched_periods','languages','countries','cities','country_language','monthly_language','monthly_country','order_buckets','sources']:
+    for name in ['monthly','annual','matched_periods','count_checks','languages','countries','cities','country_language','monthly_language','monthly_country','order_buckets','sources']:
         csv_out(output_dir/f'{name}.csv',result[name])
     print(json.dumps({"scope":result['scope'],"totals":result['totals'],"issues":issues,"languages":result['languages'],"countries":result['countries'][:12],"levels":result['levels']},ensure_ascii=False))
     return result
@@ -244,5 +263,6 @@ if __name__ == '__main__':
     parser.add_argument('--end')
     parser.add_argument('--completeness-confirmed',action='store_true')
     parser.add_argument('--blank-counts-are-zero',action='store_true')
+    parser.add_argument('--reference-counts',type=pathlib.Path)
     args=parser.parse_args()
-    analyze(args.input,args.output,args.start,args.end,args.completeness_confirmed,args.blank_counts_are_zero)
+    analyze(args.input,args.output,args.start,args.end,args.completeness_confirmed,args.blank_counts_are_zero,args.reference_counts)
