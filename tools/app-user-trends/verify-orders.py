@@ -245,6 +245,37 @@ def verify_trends(sources, report_dir):
         for c,m in enumerate(months,3):
             if m not in d['scope']['city_months']:assert sh.cell(row,c).value=='n.a.'
             else:close(sh.cell(row,c).value,orders(month=m,**group))
+    geographic_growth_rows=0
+    for block in layout.get('geography_growth',[]):
+        sh=values[block['sheet']];is_city=block['is_city'];first_value=4 if is_city else 3
+        groups=layout['cities'] if is_city else [{'country':r['country']} for r in d['countries']]
+        available=lambda m:m in months and (not is_city or m in d['scope']['city_months'])
+        for i,group in enumerate(groups):
+            for j,m in enumerate(months):
+                row=block['start']+i*len(months)+j;geographic_growth_rows+=1
+                labels=[group['country']]+([group['city']] if is_city else [])+[m]
+                assert [sh.cell(row,c).value for c in range(1,first_value)]==labels
+                year,month=map(int,m.split('-'));prev=f'{year-1}-12' if month==1 else f'{year}-{month-1:02}';py=f'{year-1}-{month:02}'
+                current=orders(month=m,**group)
+                for offset,period in [(0,m),(1,prev),(5,py)]:
+                    actual=sh.cell(row,first_value+offset).value
+                    if available(period):close(actual,orders(month=period,**group))
+                    else:assert actual=='n.a.'
+                for previous,delta_offset,rate_offset in [(prev,2,3),(py,6,7)]:
+                    ready=available(m) and available(previous) and m not in pending and previous not in pending
+                    base=orders(month=previous,**group) if available(previous) else 0
+                    if ready:
+                        close(sh.cell(row,first_value+delta_offset).value,current-base)
+                        if base:close(sh.cell(row,first_value+rate_offset).value,current/base-1)
+                        else:assert sh.cell(row,first_value+rate_offset).value=='n.a.'
+                    else:
+                        assert sh.cell(row,first_value+delta_offset).value=='n.a.'
+                        assert sh.cell(row,first_value+rate_offset).value=='n.a.'
+                base=orders(month=prev,**group) if available(prev) else 0
+                if available(m) and available(prev) and base and m not in pending and prev not in pending:
+                    daily=(current/calendar.monthrange(year,month)[1])/(base/calendar.monthrange(*map(int,prev.split('-')))[1])-1
+                    close(sh.cell(row,first_value+4).value,daily)
+                else:assert sh.cell(row,first_value+4).value=='n.a.'
     for row,group in enumerate(layout['currency'],6):
         sh=values['통화별추이'];rows=filtered(**group,status_group='completed')
         assert [sh.cell(row,c).value for c in (1,2)]==[group['month'],group['currency']]
@@ -273,7 +304,8 @@ def verify_trends(sources, report_dir):
     assert len(formulas['월별추이']._charts)==1
     result={'passed':True,'months':months,'source_rows':len(original),'orders':orders(),'formula_cells':formula_count,
             'source_hashes_match':True,'headers_and_first_data_rows_verified':True,'city_absence_not_zero':True,
-            'monthly_and_currency_growth_verified':True,'replacement_pending_months':sorted(pending),'admin_total_matches':d['scope']['admin_total_matches']}
+            'monthly_and_currency_growth_verified':True,'geographic_growth_rows_verified':geographic_growth_rows,
+            'replacement_pending_months':sorted(pending),'admin_total_matches':d['scope']['admin_total_matches']}
     values.close();formulas.close()
     (report_dir/'order-verification.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(result,ensure_ascii=False))

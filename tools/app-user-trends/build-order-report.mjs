@@ -225,6 +225,43 @@ async function buildTrendReport(data,folder){
   }
   fmt(city,`C6:${cityLast}${cityKeys.length+5}`);city.freezePanes.freezeRows(5);
 
+  // Extend the existing regional views; link their monthly counts into growth formulas.
+  function geographyGrowth(sh,items,sourceSheet,sourceStart,monthOffset,headerRow,isCity){
+    const firstValue=isCity?3:2,lastColumn=col(firstValue+7),end=headerRow+items.length*months.length;
+    sh.getRange(`A${headerRow}:${lastColumn}${end}`).format={font:{name:face,size:10,color:'#263442'},rowHeight:24,verticalAlignment:'center'};
+    note(sh,`A${headerRow-2}`,isCity?'도시별 월간 주문 증감 상세':'국가별 월간 주문 증감 상세');
+    note(sh,`A${headerRow-1}`,'전체 상태 주문 기준. 비교월 자료 없음·교체 예정은 n.a.; 비교월 주문 0건이면 증감률만 n.a.입니다. 제공 파일 기준 잠정값입니다.');
+    head(sh,headerRow,[...(isCity?['국가','도시']:['국가']),'주문월','주문수','전월 주문수','전월 증감 건수','전월 증감률','일평균 전월 증감률','전년 동월 주문수','전년 동월 증감 건수','전년 동월 증감률']);
+    const available=m=>months.includes(m)&&(!isCity||data.scope.city_months.includes(m));
+    for(let i=0;i<items.length;i++)for(let j=0;j<months.length;j++){
+      const r=headerRow+1+i*months.length+j,m=months[j],[y,n]=m.split('-').map(Number),prev=n===1?`${y-1}-12`:`${y}-${String(n-1).padStart(2,'0')}`,py=`${y-1}-${String(n).padStart(2,'0')}`;
+      sh.getRange(`A${r}:${col(firstValue-1)}${r}`).values=[[...(isCity?[items[i].country,items[i].city]:[items[i].country]),m]];
+      const ref=period=>`'${sourceSheet}'!${col(months.indexOf(period)+monthOffset)}${sourceStart+i}`;
+      const current=col(firstValue)+r,previous=col(firstValue+1)+r,delta=col(firstValue+2)+r,yearPrevious=col(firstValue+5)+r,yearDelta=col(firstValue+6)+r;
+      form(sh,current,available(m)?ref(m):'"n.a."');
+      form(sh,previous,available(prev)?ref(prev):'"n.a."');
+      form(sh,yearPrevious,available(py)?ref(py):'"n.a."');
+      const ready=available(m)&&available(prev)&&!pending.has(m)&&!pending.has(prev),yearReady=available(m)&&available(py)&&!pending.has(m)&&!pending.has(py);
+      form(sh,delta,ready?`${current}-${previous}`:'"n.a."');
+      form(sh,col(firstValue+3)+r,ready?`IF(${previous}=0,"n.a.",${delta}/${previous})`:'"n.a."');
+      const days=`'월별추이'!H${months.indexOf(m)+6}`,priorDays=`'월별추이'!H${months.indexOf(prev)+6}`;
+      form(sh,col(firstValue+4)+r,ready?`IF(${previous}=0,"n.a.",(${current}/${days})/(${previous}/${priorDays})-1)`:'"n.a."');
+      form(sh,yearDelta,yearReady?`${current}-${yearPrevious}`:'"n.a."');
+      form(sh,col(firstValue+7)+r,yearReady?`IF(${yearPrevious}=0,"n.a.",${yearDelta}/${yearPrevious})`:'"n.a."');
+    }
+    fmt(sh,`${col(firstValue)}${headerRow+1}:${col(firstValue+2)}${end}`);
+    fmt(sh,`${col(firstValue+3)}${headerRow+1}:${col(firstValue+4)}${end}`,'0.00%');
+    fmt(sh,`${col(firstValue+5)}${headerRow+1}:${col(firstValue+6)}${end}`);
+    fmt(sh,`${col(firstValue+7)}${headerRow+1}:${lastColumn}${end}`,'0.00%');
+    return {sheet:sourceSheet,header:headerRow,start:headerRow+1,end,is_city:isCity};
+  }
+  const geographyLayout=[
+    geographyGrowth(dims,data.countries,'분류별추이',matrixLayout[0].start,1,top+3,false),
+    geographyGrowth(city,cityKeys,'도시추이',6,2,cityKeys.length+10,true)
+  ];
+  note(dims,'A4',`국가별 증감 건수·증감률 상세: ${geographyLayout[0].header}행 아래.`);
+  note(city,'A4',`도시별 증감 건수·증감률 상세: ${geographyLayout[1].header}행 아래.`);
+
   const amounts=tabs['통화별추이'],currencyRows=[...data.monthly_currency].sort((a,b)=>a.currency.localeCompare(b.currency)||a.month.localeCompare(b.month));
   init(amounts,`A1:I${currencyRows.length+6}`,'통화별 배달완료 주문금액 추이');amounts.getRange(`D1:E${currencyRows.length+6}`).format.columnWidth=27;amounts.getRange(`F1:F${currencyRows.length+6}`).format.columnWidth=23;
   note(amounts,'A3','배달완료 주문만 포함. 통화 간 합산 금지. 최종금액은 배달비·할인 포함이며 회사 매출·이익·정산액을 뜻하지 않습니다.');
@@ -248,6 +285,9 @@ async function buildTrendReport(data,folder){
   const before=raw.getRange('L6').values[0][0],firstMonth=data.rows[0].month,mr=months.indexOf(firstMonth)+6;
   raw.getRange('L6').values=[[before+1]];
   if(monthly.getRange(`B${mr}`).values[0][0]!==data.monthly.find(r=>r.month===firstMonth).orders+1)throw new Error('Monthly input change did not recalculate');
+  const firstCountryIndex=data.countries.findIndex(r=>r.country===data.rows[0].country),growthCheck=geographyLayout[0].start+firstCountryIndex*months.length+months.indexOf(firstMonth);
+  const expectedCountry=data.monthly_country.find(r=>r.country===data.rows[0].country&&r.month===firstMonth).orders;
+  if(dims.getRange(`C${growthCheck}`).values[0][0]!==expectedCountry+1)throw new Error('Geographic growth input did not recalculate');
   raw.getRange('L6').values=[[before]];book.recalculate();
   for(let i=0;i<months.length;i++)if(monthly.getRange(`B${i+6}`).values[0][0]!==data.monthly[i].orders)throw new Error('Monthly total mismatch');
   const errors=await book.inspect({kind:'match',searchTerm:'#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A|#NUM!|#NULL!|#SPILL!|#CALC!',options:{useRegex:true,maxResults:20},summary:'Order trend formula errors'});
@@ -255,7 +295,8 @@ async function buildTrendReport(data,folder){
   await fs.writeFile(path.join(folder,'order-formula-check.json'),errors.ndjson);
   const ranges={'월별추이':`A1:M${chartTop+18}`,'분류별추이':`A1:${lastMatrix}${top-2}`,'도시추이':`A1:${cityLast}15`,'통화별추이':'A1:I18','집계자료':'A1:O12'};
   for(const [sheetName,range] of Object.entries(ranges)){const blob=await book.render({sheetName,range,scale:1,format:'png'});await fs.writeFile(path.join(folder,`preview-${sheetName}.png`),new Uint8Array(await blob.arrayBuffer()));}
-  await fs.writeFile(path.join(folder,'order-layout.json'),JSON.stringify({matrix:matrixLayout,currency:currencyRows.map(r=>({month:r.month,currency:r.currency})),cities:cityKeys.map(r=>({country:r.country,city:r.city}))}));
+  for(const item of geographyLayout){const blob=await book.render({sheetName:item.sheet,range:`A${item.header-2}:${item.is_city?'K':'J'}${item.start+months.length}`,scale:1,format:'png'});await fs.writeFile(path.join(folder,`preview-${item.is_city?'도시증감':'국가증감'}.png`),new Uint8Array(await blob.arrayBuffer()));}
+  await fs.writeFile(path.join(folder,'order-layout.json'),JSON.stringify({matrix:matrixLayout,geography_growth:geographyLayout,currency:currencyRows.map(r=>({month:r.month,currency:r.currency})),cities:cityKeys.map(r=>({country:r.country,city:r.city}))}));
   const name=`주문추이_${months[0].replace('-','')}_${months.at(-1).replace('-','')}.xlsx`;
   await (await SpreadsheetFile.exportXlsx(book)).save(path.join(folder,name));console.log(JSON.stringify({output:path.join(folder,name),months:months.length,orders:data.totals.orders}));
 }
